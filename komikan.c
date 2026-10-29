@@ -10,7 +10,10 @@
 #define PERRO 2
 #define INVALIDO -1
 
-// estructura para pasarle a cada perro su id y posicion inicial
+// direcciones: arriba, abajo, izq, der, y 4 diagonales
+int df[] = {-1, 1, 0, 0, -1, -1, 1, 1};
+int dc[] = {0, 0, -1, 1, -1, 1, -1, 1};
+
 typedef struct {
     int id;
     int f;
@@ -60,7 +63,6 @@ void retardo_aleatorio() {
     usleep(delay_ms * 1000); 
 }
 
-// funcion atómica con mutex para mover fichas
 int intentar_mover(int f_act, int c_act, int f_sig, int c_sig, int ficha) {
     if (f_sig < 0 || f_sig >= 7 || c_sig < 0 || c_sig >= 5) return 0;
 
@@ -77,17 +79,19 @@ int intentar_mover(int f_act, int c_act, int f_sig, int c_sig, int ficha) {
 
 void* rutina_puma(void* arg) {
     (void)arg;
-    int f = 4, c = 2; // posicion inicial puma
+    int f = 4, c = 2;
 
-    for (int i = 0; i < 3; i++) { // 3 movimientos de prueba
+    for (int i = 0; i < 5; i++) {
         retardo_aleatorio();
-        int f_destino = f + 1; // intenta avanzar abajo
-        if (intentar_mover(f, c, f_destino, c, PUMA)) {
-            printf("puma: movio a (%d, %d)\n", f_destino, c);
-            f = f_destino;
+        int dir = rand() % 8;
+        int f_dest = f + df[dir];
+        int c_dest = c + dc[dir];
+
+        if (intentar_mover(f, c, f_dest, c_dest, PUMA)) {
+            printf("puma: movio a (%d, %d)\n", f_dest, c_dest);
+            f = f_dest;
+            c = c_dest;
             mostrar_tablero();
-        } else {
-            printf("puma: no pudo mover a (%d, %d)\n", f_destino, c);
         }
     }
     return NULL;
@@ -98,12 +102,16 @@ void* rutina_perro(void* arg) {
     int f = p->f;
     int c = p->c;
 
-    for (int i = 0; i < 3; i++) { // 3 movimientos de prueba
+    for (int i = 0; i < 5; i++) {
         retardo_aleatorio();
-        int f_destino = f + 1; // intenta avanzar abajo
-        if (intentar_mover(f, c, f_destino, c, PERRO)) {
-            printf("perro %d: movio a (%d, %d)\n", p->id, f_destino, c);
-            f = f_destino;
+        int dir = rand() % 8;
+        int f_dest = f + df[dir];
+        int c_dest = c + dc[dir];
+
+        if (intentar_mover(f, c, f_dest, c_dest, PERRO)) {
+            printf("perro %d: movio a (%d, %d)\n", p->id, f_dest, c_dest);
+            f = f_dest;
+            c = c_dest;
             mostrar_tablero();
         }
     }
@@ -129,10 +137,8 @@ int main(int argc, char *argv[]) {
     pthread_t hilos_perros[12];
     Posicion pos_perros[12];
 
-    // ubica al puma
     tablero[4][2] = PUMA;
 
-    // ubica a los 12 perros
     int idx = 0;
     for (int j = 0; j < 5; j++) {
         tablero[2][j] = PERRO;
