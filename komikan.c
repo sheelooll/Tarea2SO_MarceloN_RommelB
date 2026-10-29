@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <time.h> // para los numeros aleatorios
 
 #define VACIO 0
 #define PUMA 1
@@ -26,16 +27,30 @@ void inicializar_tablero() {
     printf("tablero ok con mutex\n");
 }
 
-// funcion que ejecuta el hilo del puma
+// funcion auxiliar que genera el retardo aleatorio entre 50 y 300 ms
+void retardo_aleatorio() {
+    int delay_ms = (rand() % (300 - 50 + 1)) + 50;
+    // usleep trabaja en microsegundos, multiplica por 1000
+    usleep(delay_ms * 1000); 
+}
+
 void* rutina_puma(void* arg) {
-    printf("puma: listo para jugar\n");
+    (void)arg; 
+    
+    printf("puma: calculando movimiento...\n");
+    retardo_aleatorio();
+    printf("puma: listo para jugar despues del retardo\n");
+    
     return NULL;
 }
 
-// funcion que ejecutan los 12 hilos de los perros
 void* rutina_perro(void* arg) {
     int id = *(int*)arg;
-    printf("perro %d: listo para jugar\n", id);
+    
+    printf("perro %d: calculando movimiento...\n", id);
+    retardo_aleatorio();
+    printf("perro %d: listo para jugar despues del retardo\n", id);
+    
     return NULL;
 }
 
@@ -45,6 +60,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // semilla aleatoria para los retardos
+    srand(time(NULL)); 
+
     int n = atoi(argv[1]);
     int m = atoi(argv[2]);
 
@@ -52,21 +70,17 @@ int main(int argc, char *argv[]) {
 
     inicializar_tablero();
 
-    // variables para guardar los hilos
     pthread_t hilo_puma;
     pthread_t hilos_perros[12];
-    int ids_perros[12]; // para que cada perro sepa su numero
+    int ids_perros[12];
 
-    // hilo del puma
     pthread_create(&hilo_puma, NULL, rutina_puma, NULL);
 
-    // 12 hilos de los perros
     for (int i = 0; i < 12; i++) {
         ids_perros[i] = i + 1;
         pthread_create(&hilos_perros[i], NULL, rutina_perro, &ids_perros[i]);
     }
 
-    // espera a que todos terminen para que el programa no muera antes
     pthread_join(hilo_puma, NULL);
     for (int i = 0; i < 12; i++) {
         pthread_join(hilos_perros[i], NULL);
