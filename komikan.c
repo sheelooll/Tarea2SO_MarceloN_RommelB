@@ -10,7 +10,6 @@
 #define PERRO 2
 #define INVALIDO -1
 
-// direcciones: arriba, abajo, izq, der, y 4 diagonales
 int df[] = {-1, 1, 0, 0, -1, -1, 1, 1};
 int dc[] = {0, 0, -1, 1, -1, 1, -1, 1};
 
@@ -23,9 +22,12 @@ typedef struct {
 int tablero[7][5];
 pthread_mutex_t mutex_tablero;
 
+int perros_capturados = 0;
+int juego_terminado = 0; // avisa a los hilos que la partida concluyo
+
 void mostrar_tablero() {
     pthread_mutex_lock(&mutex_tablero);
-    printf("\n--- ESTADO DEL TABLERO ---\n");
+    printf("\n--- ESTADO DEL TABLERO (Capturados: %d) ---\n", perros_capturados);
     for (int i = 0; i < 7; i++) {
         for (int j = 0; j < 5; j++) {
             if (tablero[i][j] == INVALIDO) {
@@ -40,7 +42,7 @@ void mostrar_tablero() {
         }
         printf("\n");
     }
-    printf("--------------------------\n\n");
+    printf("-------------------------------------------\n\n");
     pthread_mutex_unlock(&mutex_tablero);
 }
 
@@ -50,7 +52,6 @@ void inicializar_tablero() {
             tablero[i][j] = VACIO;
         }
     }
-    
     tablero[0][0] = INVALIDO; tablero[0][1] = INVALIDO;
     tablero[0][3] = INVALIDO; tablero[0][4] = INVALIDO;
     tablero[1][0] = INVALIDO; tablero[1][4] = INVALIDO;
@@ -60,16 +61,64 @@ void inicializar_tablero() {
 
 void retardo_aleatorio() {
     int delay_ms = (rand() % (300 - 50 + 1)) + 50;
-    usleep(delay_ms * 1000); 
+    usleep(delay_ms * 1000);
 }
 
-int intentar_mover(int f_act, int c_act, int f_sig, int c_sig, int ficha) {
+// intenta mover o capturar si es el puma
+int intentar_accion_puma(int f, int c, int dir, int *f_out, int *c_out) {
+    int f_adj = f + df[dir];
+    int c_adj = c + dc[dir];
+
+    if (f_adj < 0 || f_adj >= 7 || c_adj < 0 || c_adj >= 5) return 0;
+
+    pthread_mutex_lock(&mutex_tablero);
+
+    // movimiento a casilla vacia
+    if (tablero[f_adj][c_adj] == VACIO) {
+        tablero[f][c] = VACIO;
+        tablero[f_adj][c_adj] = PUMA;
+        *f_out = f_adj;
+        *c_out = c_adj;
+        pthread_mutex_unlock(&mutex_tablero);
+        return 1;
+    }
+
+    // captura saltando sobre un perro
+    if (tablero[f_adj][c_adj] == PERRO) {
+        int f_salto = f + 2 * df[dir];
+        int c_salto = c + 2 * dc[dir];
+
+        if (f_salto >= 0 && f_salto < 7 && c_salto >= 0 && c_salto < 5) {
+            if (tablero[f_salto][c_salto] == VACIO) {
+                tablero[f][c] = VACIO;
+                tablero[f_adj][c_adj] = VACIO; // perro capturado
+                tablero[f_salto][c_salto] = PUMA;
+                perros_capturados++;
+                printf("puma: CAPTURO a un perro en (%d, %d)!\n", f_adj, c_adj);
+                if (perros_capturados >= 6) {
+                    juego_terminado = 1;
+                    printf("¡VICTORIA DEL PUMA! Capturo 6 perros.\n");
+                }
+
+                *f_out = f_salto;
+                *c_out = c_salto;
+                pthread_mutex_unlock(&mutex_tablero);
+                return 1;
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&mutex_tablero);
+    return 0;
+}
+
+int intentar_mover_perro(int f_act, int c_act, int f_sig, int c_sig) {
     if (f_sig < 0 || f_sig >= 7 || c_sig < 0 || c_sig >= 5) return 0;
 
     pthread_mutex_lock(&mutex_tablero);
     if (tablero[f_sig][c_sig] == VACIO) {
         tablero[f_act][c_act] = VACIO;
-        tablero[f_sig][c_sig] = ficha;
+        tablero[f_sig][c_sig] = PERRO;
         pthread_mutex_unlock(&mutex_tablero);
         return 1;
     }
@@ -81,16 +130,14 @@ void* rutina_puma(void* arg) {
     (void)arg;
     int f = 4, c = 2;
 
-    for (int i = 0; i < 5; i++) {
+    while (!juego_terminado) {
         retardo_aleatorio();
         int dir = rand() % 8;
-        int f_dest = f + df[dir];
-        int c_dest = c + dc[dir];
+        int f_nueva, c_nueva;
 
-        if (intentar_mover(f, c, f_dest, c_dest, PUMA)) {
-            printf("puma: movio a (%d, %d)\n", f_dest, c_dest);
-            f = f_dest;
-            c = c_dest;
+        if (intentar_accion_puma(f, c, dir, &f_nueva, &c_nueva)) {
+            f = f_nueva;
+            c = c_nueva;
             mostrar_tablero();
         }
     }
@@ -102,17 +149,15 @@ void* rutina_perro(void* arg) {
     int f = p->f;
     int c = p->c;
 
-    for (int i = 0; i < 5; i++) {
+    while (!juego_terminado) {
         retardo_aleatorio();
         int dir = rand() % 8;
         int f_dest = f + df[dir];
         int c_dest = c + dc[dir];
 
-        if (intentar_mover(f, c, f_dest, c_dest, PERRO)) {
-            printf("perro %d: movio a (%d, %d)\n", p->id, f_dest, c_dest);
+        if (intentar_mover_perro(f, c, f_dest, c_dest)) {
             f = f_dest;
             c = c_dest;
-            mostrar_tablero();
         }
     }
     return NULL;
@@ -124,7 +169,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    srand(time(NULL)); 
+    srand(time(NULL));
 
     int n = atoi(argv[1]);
     int m = atoi(argv[2]);
