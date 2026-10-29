@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <unistd.h>
@@ -12,13 +13,11 @@
 #define perro 2
 #define invalido -1
 
-// direcciones posibles de movimiento
 int df[] = {-1, 1, 0, 0, -1, -1, 1, 1};
 int dc[] = {0, 0, -1, 1, -1, 1, -1, 1};
 
 sem_t sem_mesas_libres;
 
-// flag para detener todo con ctrl+c
 volatile sig_atomic_t interrupcion_servidor = 0;
 
 void manejador_sigint(int sig) {
@@ -74,7 +73,6 @@ void inicializar_tablero(partida* p) {
             p->tablero[i][j] = vacio;
         }
     }
-    // anular casillas fuera del mapa
     p->tablero[0][0] = invalido; p->tablero[0][1] = invalido;
     p->tablero[0][3] = invalido; p->tablero[0][4] = invalido;
     p->tablero[1][0] = invalido; p->tablero[1][4] = invalido;
@@ -89,6 +87,33 @@ void retardo_aleatorio() {
     usleep(delay_ms * 1000);
 }
 
+int puma_esta_acorralado(partida* p, int f, int c) {
+    pthread_mutex_lock(&p->mutex_tablero);
+    for (int dir = 0; dir < 8; dir++) {
+        int f_adj = f + df[dir];
+        int c_adj = c + dc[dir];
+
+        if (f_adj >= 0 && f_adj < 7 && c_adj >= 0 && c_adj < 5) {
+            if (p->tablero[f_adj][c_adj] == vacio) {
+                pthread_mutex_unlock(&p->mutex_tablero);
+                return 0;
+            }
+            if (p->tablero[f_adj][c_adj] == perro) {
+                int f_salto = f + 2 * df[dir];
+                int c_salto = c + 2 * dc[dir];
+                if (f_salto >= 0 && f_salto < 7 && c_salto >= 0 && c_salto < 5) {
+                    if (p->tablero[f_salto][c_salto] == vacio) {
+                        pthread_mutex_unlock(&p->mutex_tablero);
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+    pthread_mutex_unlock(&p->mutex_tablero);
+    return 1;
+}
+
 int intentar_accion_puma(partida* p, int f, int c, int dir, int *f_out, int *c_out) {
     int f_adj = f + df[dir];
     int c_adj = c + dc[dir];
@@ -97,7 +122,6 @@ int intentar_accion_puma(partida* p, int f, int c, int dir, int *f_out, int *c_o
 
     pthread_mutex_lock(&p->mutex_tablero);
 
-    // movimiento simple
     if (p->tablero[f_adj][c_adj] == vacio) {
         p->tablero[f][c] = vacio;
         p->tablero[f_adj][c_adj] = puma;
@@ -107,7 +131,6 @@ int intentar_accion_puma(partida* p, int f, int c, int dir, int *f_out, int *c_o
         return 1;
     }
 
-    // intento de captura
     if (p->tablero[f_adj][c_adj] == perro) {
         int f_salto = f + 2 * df[dir];
         int c_salto = c + 2 * dc[dir];
@@ -156,6 +179,13 @@ void* rutina_puma(void* arg) {
 
     while (!p->juego_terminado && !interrupcion_servidor) {
         retardo_aleatorio();
+
+        if (puma_esta_acorralado(p, f, c)) {
+            p->juego_terminado = 1;
+            printf("victoria de los perros en partida %d (puma acorralado)\n", p->id_partida);
+            break;
+        }
+
         int dir = rand() % 8;
         int f_nueva, c_nueva;
 
@@ -190,7 +220,6 @@ void* rutina_perro(void* arg) {
 void* rutina_juez_mesa(void* arg) {
     partida* p = (partida*)arg;
     printf("partida %d esperando mesa libre...\n", p->id_partida);
-    // espera de mesa libre
     while (!interrupcion_servidor) {
         if (sem_trywait(&sem_mesas_libres) == 0) {
             break;
@@ -258,11 +287,27 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // captura de ctrl+c
     signal(SIGINT, manejador_sigint);
 
-    srand(time(NULL)); 
+    unsigned int semilla = time(NULL);
+    if (argc >= 4) {
+        FILE* fconfig = fopen(argv[3], "r");
+        if (fconfig != NULL) {
+            char clave[32];
+            int val;
+            while (fscanf(fconfig, "%s %d", clave, &val) != EOF) {
+                if (strcmp(clave, "seed") == 0) {
+                    semilla = val;
+                }
+            }
+            fclose(fconfig);
+            printf("config leido, semilla: %u\n", semilla);
+        } else {
+            printf("usando archivo config: %s\n", argv[3]);
+        }
+    }
 
+    srand(semilla);
     int n = atoi(argv[1]);
     int m = atoi(argv[2]);
 
