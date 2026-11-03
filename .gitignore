@@ -1,0 +1,6 @@
+# Ejecutable y objetos generados por make
+torneo
+*.o
+
+# Logs y salidas de ejecucion
+*.log
